@@ -2,7 +2,6 @@ library(shiny)
 library(rio)  # For easy data import
 library(dplyr)
 library(ggplot2)  # For plotting
-library(shinythemes)
 library(tidyverse)
 library(bs4Dash) # For enhanced UI (bs4Dash)
 
