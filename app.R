@@ -14,7 +14,6 @@ years <- 2008:2012
 epi_data_list <- list()
 
 for (year in years) {
-  # Create a dummy dataset for each year, based on the original epi_data
   epi_data <- import("data/2008-epi-all-countries-winsorization.csv") # Or read from your sources
   epi_data <- epi_data[, !duplicated(names(epi_data))]
   epi_data <- epi_data %>%
@@ -37,14 +36,14 @@ epi_data_all <- epi_data_all %>%
 # Define UI ---------------------------------------------------------------
 ui <-
   page_fluid(
-    theme = bs_theme(bootswatch = "journal"), # Apply a Bootswatch theme
+    theme = bs_theme(bootswatch = "superhero"), # Apply a Bootswatch theme
+    
     titlePanel("Global EPI Explorer"),  # Set the main title
     
     layout_sidebar(
       sidebar = sidebar(
-        width = "250px",  # Adjust sidebar width as needed
-        selectInput("indicator", "Choose an Indicator:",
-                    choices = c("EPI", "ENVHEALTH", "ECOSYSTEM", "GDP_capita", "Population2005", "DALY_SC")),
+        width = "280px",  # Adjust sidebar width as needed (increased width)
+        actionButton("show_indicator_modal", "Select Indicator"),  # Button to trigger the modal
         sliderInput("epi_range", "EPI Score Range:",
                     min = min(epi_data_all$EPI, na.rm = TRUE),
                     max = max(epi_data_all$EPI, na.rm = TRUE),
@@ -53,19 +52,18 @@ ui <-
                     choices = c("All", levels(epi_data_all$EPI_regions)), selected = "All"), # Changed epi_data to epi_data_all
         selectInput("plot_theme", "Choose Plot Theme:",
                     choices = c("Classic", "Minimal", "Dark")), # Added theme selection
-        sliderInput("year", "Select Year:", # Added year slider
-                    min = min(epi_data_all$Year, na.rm = TRUE),
-                    max = max(epi_data_all$Year, na.rm = TRUE),
-                    value = min(epi_data_all$Year, na.rm = TRUE),
-                    step = 1,
-                    sep = "")
+        uiOutput("year_slider"), # Dynamic year slider (rendered in server)
+        hr(),  # Add a horizontal rule for visual separation
+        tags$p("Data Source: [Your Data Source Here]", style = "font-size: 80%"), # Add a data source acknowledgement
+        tags$p("App by: [Your Name]", style = "font-size: 80%")  # Add a creator acknowledgement
+        
       ),
       
       layout_columns(
         col_widths = c(4, 4, 4),
-        value_box("Average EPI", textOutput("avg_epi")),
-        value_box("Highest EPI", textOutput("max_epi")),
-        value_box("Number of Countries", textOutput("country_count"))
+        value_box("Average EPI", textOutput("avg_epi"), showcase = "chart-line"), # changed icon
+        value_box("Highest EPI", textOutput("max_epi"), showcase = "trophy"),   # changed icon
+        value_box("Number of Countries", textOutput("country_count"), showcase = "flag") # changed icon
       ),
       
       layout_columns(
@@ -99,13 +97,40 @@ ui <-
         card_header("EPI Over Time"),
         full_screen = TRUE,
         card_body(plotOutput("timeline_plot"))
-      )
-      
+      ),
+      # Hidden input to store selected indicator
+      tags$div(id = "selected_indicator", style = "display:none;")
     )
   )
 
 # Define server logic -----------------------------------------------------
-server <- function(input, output) {
+server <- function(input, output, session) {
+  
+  # **Modal Dialog for Indicator Selection**
+  observeEvent(input$show_indicator_modal, {
+    showModal(modalDialog(
+      title = "Choose an Indicator",
+      selectInput("modal_indicator", "Indicator:",
+                  choices = c("EPI", "ENVHEALTH", "ECOSYSTEM", "GDP_capita", "Population2005", "DALY_SC")),
+      footer = tagList(
+        modalButton("Cancel"),
+        actionButton("confirm_indicator", "Confirm")
+      )
+    ))
+  })
+  
+  # **Update selected_indicator when confirmed**
+  observeEvent(input$confirm_indicator, {
+    updateTextInput(session, "selected_indicator", value = input$modal_indicator)
+    removeModal()
+  })
+  
+  # Reactive expression to get the selected indicator (from the hidden input)
+  selected_indicator <- reactive({
+    req(input$selected_indicator)
+    input$selected_indicator
+  })
+  
   
   # Reactive expression for filtered data (for main plots)
   filtered_data <- reactive({
@@ -129,6 +154,15 @@ server <- function(input, output) {
            "Dark" = theme_dark())
   })
   
+  # **Dynamic Year Slider**
+  output$year_slider <- renderUI({
+    sliderInput("year", "Select Year:",
+                min = min(epi_data_all$Year, na.rm = TRUE),
+                max = max(epi_data_all$Year, na.rm = TRUE),
+                value = min(epi_data_all$Year, na.rm = TRUE),
+                step = 1,
+                sep = "")
+  })
   
   # Value Box outputs
   output$avg_epi <- renderText({
@@ -149,14 +183,14 @@ server <- function(input, output) {
   
   # Create the bar chart
   output$epi_plot <- renderPlot({
-    req(filtered_data()) # Ensure data is available
+    req(filtered_data(), selected_indicator()) # Ensure data and indicator are available
     
-    ggplot(filtered_data(), aes(x = Country, y = .data[[input$indicator]])) +
+    ggplot(filtered_data(), aes(x = Country, y = .data[[selected_indicator()]])) +
       geom_bar(stat = "identity", fill = "steelblue") +
       coord_flip() +
-      labs(title = paste(input$indicator, "by Country"),
+      labs(title = paste(selected_indicator(), "by Country"),
            x = "Country",
-           y = input$indicator) +
+           y = selected_indicator()) +
       theme_minimal() + theme_choice()  # Apply selected theme
   })
   
@@ -201,19 +235,19 @@ server <- function(input, output) {
   
   # Timeline plot
   output$timeline_plot <- renderPlot({
-    req(input$indicator) # Ensure an indicator is selected
+    req(selected_indicator()) # Ensure indicator is selected
     
     # Group by year and calculate the average indicator value
     timeline_data <- epi_data_all %>%
       group_by(Year) %>%
-      summarize(avg_indicator = mean(.data[[input$indicator]], na.rm = TRUE))
+      summarize(avg_indicator = mean(.data[[selected_indicator()]], na.rm = TRUE))
     
     ggplot(timeline_data, aes(x = Year, y = avg_indicator)) +
       geom_line(color = "blue") +
       geom_point(color = "blue") +
-      labs(title = paste("Average", input$indicator, "Over Time"),
+      labs(title = paste("Average", selected_indicator(), "Over Time"),
            x = "Year",
-           y = input$indicator) +
+           y = selected_indicator()) +
       theme_minimal() + theme_choice()
   })
 }
