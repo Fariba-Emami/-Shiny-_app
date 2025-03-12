@@ -5,6 +5,7 @@ library(ggplot2)  # For plotting
 library(shinythemes)
 library(tidyverse)
 library(bslib) # For enhanced UI
+library(shinyWidgets) # added install.packages("shinyWidgets")
 
 # **1. Data Preparation (Modify this to load your actual time-series data)**
 
@@ -53,9 +54,20 @@ ui <-
         selectInput("plot_theme", "Choose Plot Theme:",
                     choices = c("Classic", "Minimal", "Dark")), # Added theme selection
         uiOutput("year_slider"), # Dynamic year slider (rendered in server)
+        
+        # NEW: Multi-select widget for countries
+        pickerInput(
+          inputId = "countries",
+          label = "Select Countries:",
+          choices = unique(epi_data_all$Country),
+          options = list(`actions-box` = TRUE),
+          multiple = TRUE,
+          selected = unique(epi_data_all$Country)  # Initially select all
+        ),
+        
         hr(),  # Add a horizontal rule for visual separation
-        tags$p("Data Source: [Your Data Source Here]", style = "font-size: 80%"), # Add a data source acknowledgement
-        tags$p("App by: [Your Name]", style = "font-size: 80%")  # Add a creator acknowledgement
+        tags$p("Data Source: [NASA]", style = "font-size: 80%"), # Add a data source acknowledgement
+        tags$p("App by: [Fariba]", style = "font-size: 80%")  # Add a creator acknowledgement
         
       ),
       
@@ -142,6 +154,10 @@ server <- function(input, output, session) {
     
     data <- data %>%
       filter(EPI >= input$epi_range[1] & EPI <= input$epi_range[2])
+    
+    # NEW: Filter by selected countries
+    data <- data %>%
+      filter(Country %in% input$countries)
     
     data # Return the filtered data
   })
