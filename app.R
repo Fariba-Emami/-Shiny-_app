@@ -6,6 +6,7 @@ library(shinythemes)
 library(tidyverse)
 library(bslib) # For enhanced UI
 library(shinyWidgets) # added install.packages("shinyWidgets")
+library(shinyjs) # For show/hide elements
 
 # **1. Data Preparation (Modify this to load your actual time-series data)**
 
@@ -37,8 +38,9 @@ epi_data_all <- epi_data_all %>%
 # Define UI ---------------------------------------------------------------
 ui <-
   page_fluid(
-    theme = bs_theme(bootswatch = "superhero"), # Apply a Bootswatch theme
-    
+    useShinyjs(), # for virtual select, show/hide elements
+    # Dynamic Theme
+    uiOutput("dynamic_theme"),
     titlePanel("Global EPI Explorer"),  # Set the main title
     
     layout_sidebar(
@@ -65,8 +67,66 @@ ui <-
           selected = unique(epi_data_all$Country)  # Initially select all
         ),
         
+        # Add the prettyCheckbox
+        prettyCheckbox(
+          inputId = "Id023",
+          label = "Filter High Population",
+          value = FALSE,  # Starts unchecked
+          status = "success",
+          fill = TRUE
+        ),
+        # Add the checkboxGroupButtons
+        checkboxGroupButtons( # or radioGroupButtons
+          inputId = "id",
+          label = "Choice: ",
+          choices = c("A", "B", "C")
+        ),
+        
+        # Select menu
+        pickerInput(
+          inputId = "month_picker",
+          label = "Select:",
+          choices = month.name,
+          options = pickerOptions(
+            actionsBox = TRUE,
+            size = 10,
+            selectedTextFormat = "count > 3"
+          ),
+          multiple = TRUE
+        ),
+        
+        # Virtual select
+        virtualSelectInput(
+          inputId = "season_picker",
+          label = "Select Season:",
+          choices = list(
+            "Spring" = c("March", "April", "May"),
+            "Summer" = c("June", "July", "August"),
+            "Autumn" = c("September", "October", "November"),
+            "Winter" = c("December", "January", "February")
+          ),
+          showValueAsTags = TRUE,
+          search = TRUE,
+          multiple = TRUE
+        ),
+        
+        # Dark Mode Toggle
+        switchInput(
+          inputId = "dark_mode",
+          label = "Dark Mode",
+          value = FALSE
+        ),
+        
+        # Theme Color Chooser
+        selectInput(
+          inputId = "theme_color",
+          label = "Theme Color:",
+          choices = c("superhero", "flatly", "sandstone", "united", "cosmo", "lumen", "simplex", "yeti"),
+          selected = "superhero"
+        ),
+        
         hr(),  # Add a horizontal rule for visual separation
-        tags$p("Data Source: [NASA]", style = "font-size: 80%"), # Add a data source acknowledgement
+        tags$p("Data Source: [NASA_EPI]", style = "font-size: 80%"), # Add a data source acknowledgement
         tags$p("App by: [Fariba]", style = "font-size: 80%")  # Add a creator acknowledgement
         
       ),
@@ -118,6 +178,40 @@ ui <-
 # Define server logic -----------------------------------------------------
 server <- function(input, output, session) {
   
+  # Dynamic Theme (bslib)
+  output$dynamic_theme <- renderUI({
+    bs_theme(bootswatch = input$theme_color, version = 5)
+  })
+  
+  # **Observe the prettyCheckbox Input**
+  observeEvent(input$Id023, {
+    if (input$Id023) {
+      print("Checkbox is checked: Filtering High Population")
+      # Add code here to do something when the checkbox is checked
+    } else {
+      print("Checkbox is unchecked: No High Population Filter")
+      # Add code here to do something when it's unchecked
+    }
+  })
+  
+  # **Observe checkboxGroupButtons input**
+  observeEvent(input$id, {
+    print(paste("Selected choices:", paste(input$id, collapse = ", ")))
+    # Add code here to do something with the selected choices from the checkboxGroupButtons
+  })
+  
+  # **Observe pickerInput (month_picker) input**
+  observeEvent(input$month_picker, {
+    print(paste("Selected months:", paste(input$month_picker, collapse = ", ")))
+    # Add code here to do something with the selected months
+  })
+  
+  # **Observe virtualSelectInput (season_picker) input**
+  observeEvent(input$season_picker, {
+    print(paste("Selected seasons/months:", paste(input$season_picker, collapse = ", ")))
+    # Add code here to do something with the selected seasons/months
+  })
+  
   # **Modal Dialog for Indicator Selection**
   observeEvent(input$show_indicator_modal, {
     showModal(modalDialog(
@@ -143,7 +237,6 @@ server <- function(input, output, session) {
     input$selected_indicator
   })
   
-  
   # Reactive expression for filtered data (for main plots)
   filtered_data <- reactive({
     data <- epi_data_all %>% filter(Year == input$year) # Filter by year
@@ -159,10 +252,16 @@ server <- function(input, output, session) {
     data <- data %>%
       filter(Country %in% input$countries)
     
+    # NEW: Additional filter based on checkbox
+    if (input$Id023) {
+      # Checkbox is checked: Filter for countries with population > 1 million
+      data <- data %>% filter(Population2005 > 1000000)  # Or whatever criteria you want
+    }
+    
     data # Return the filtered data
   })
   
-  # Theme choice based on user input
+  # Theme choice based on user input (for plots)
   theme_choice <- reactive({
     switch(input$plot_theme,
            "Classic" = theme_classic(),
