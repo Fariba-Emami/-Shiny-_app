@@ -1,63 +1,87 @@
 library(shiny)
-library(rio)  # For easy data import
+library(rio)        # For easy data import
 library(dplyr)
-library(ggplot2)  # For plotting
+library(ggplot2)
 library(shinythemes)
 library(tidyverse)
-library(bslib) # For enhanced UI
-library(shinyWidgets) # added install.packages("shinyWidgets")
-library(shinyjs) # For show/hide elements
+library(bslib)       # Enhanced UI
+library(shinyWidgets) # Enhanced input widgets
+library(shinyjs)      # Show/hide UI elements
 
-# **1. Data Preparation (Modify this to load your actual time-series data)**
+# **1. Data Preparation**
 
-# Create a dummy time series data (replace this with your actual data loading)
-set.seed(123) # for reproducibility
-years <- 2008:2012
-epi_data_list <- list()
+# Store the file path
+data_file <- "data/2008-epi-all-countries-winsorization.csv"
 
-for (year in years) {
-  epi_data <- import("data/2008-epi-all-countries-winsorization.csv") # Or read from your sources
-  epi_data <- epi_data[, !duplicated(names(epi_data))]
-  epi_data <- epi_data %>%
-    mutate(Population2005 = as.numeric(Population2005)) %>%
-    filter(!is.na(Population2005)) %>%
-    arrange(desc(Population2005)) %>%
-    head(10)
-  epi_data <- epi_data %>%
-    mutate(Population2005 = as.numeric(Population2005),
-           EPI = as.numeric(EPI) + rnorm(nrow(epi_data), 0, 2), # Add some random variation for each year
-           ENVHEALTH = as.numeric(ENVHEALTH) + rnorm(nrow(epi_data), 0, 1),
-           ECOSYSTEM = as.numeric(ECOSYSTEM) + rnorm(nrow(epi_data), 0, 1)) %>%
-    mutate(Year = year) # Add a year column
-  epi_data_list[[as.character(year)]] <- epi_data # Store the dataframe
+# Function to load and process data
+load_epi_data <- function(file_path) {
+  years <- 2008:2012
+  epi_data_list <- list()
+  
+  for (year in years) {
+    epi_data <- import(file_path)
+    epi_data <- epi_data[, !duplicated(names(epi_data))]
+    epi_data <- epi_data %>%
+      mutate(Population2005 = as.numeric(Population2005)) %>%
+      filter(!is.na(Population2005)) %>%
+      arrange(desc(Population2005)) %>%
+      head(10)
+    epi_data <- epi_data %>%
+      mutate(Population2005 = as.numeric(Population2005),
+             EPI = as.numeric(EPI) + rnorm(nrow(epi_data), 0, 2),
+             ENVHEALTH = as.numeric(ENVHEALTH) + rnorm(nrow(epi_data), 0, 1),
+             ECOSYSTEM = as.numeric(ECOSYSTEM) + rnorm(nrow(epi_data), 0, 1)) %>%
+      mutate(Year = year)
+    epi_data_list[[as.character(year)]] <- epi_data
+  }
+  epi_data_all <- bind_rows(epi_data_list)
+  epi_data_all <- epi_data_all %>%
+    mutate(Year = as.integer(Year))
+  return(epi_data_all)
 }
-epi_data_all <- bind_rows(epi_data_list) # combine all years' data
-epi_data_all <- epi_data_all %>%
-  mutate(Year = as.integer(Year)) # Ensure Year is integer
+
+# Load data initially
+epi_data_all <- load_epi_data(data_file)
+
+# Initialize filtered data with the full dataset
+epi_data_all_filtered <- epi_data_all
+
 
 # Define UI ---------------------------------------------------------------
 ui <-
   page_fluid(
-    useShinyjs(), # for virtual select, show/hide elements
-    # Dynamic Theme
-    uiOutput("dynamic_theme"),
+    useShinyjs(), # Required for shinyjs
+    theme = bs_theme(bootswatch = "superhero"), # Apply a Bootswatch theme
+    
     titlePanel("Global EPI Explorer"),  # Set the main title
     
     layout_sidebar(
       sidebar = sidebar(
-        width = "280px",  # Adjust sidebar width as needed (increased width)
-        actionButton("show_indicator_modal", "Select Indicator"),  # Button to trigger the modal
+        width = "280px",  # Adjust sidebar width
+        actionButton("show_indicator_modal", "Select Indicator"),  # Modal button
+        
+        # Pretty Checkbox to Show/Hide EPI Range
+        prettyCheckbox(
+          inputId = "show_epi_range",
+          label = "Show EPI Range Slider",
+          value = TRUE,  # Starts checked
+          status = "success",
+          fill = TRUE
+        ),
+        
+        # Slider Input (initially visible)
         sliderInput("epi_range", "EPI Score Range:",
                     min = min(epi_data_all$EPI, na.rm = TRUE),
                     max = max(epi_data_all$EPI, na.rm = TRUE),
                     value = c(min(epi_data_all$EPI, na.rm = TRUE), max(epi_data_all$EPI, na.rm = TRUE))),
-        selectInput("region", "Choose a region:",
-                    choices = c("All", levels(epi_data_all$EPI_regions)), selected = "All"), # Changed epi_data to epi_data_all
-        selectInput("plot_theme", "Choose Plot Theme:",
-                    choices = c("Classic", "Minimal", "Dark")), # Added theme selection
-        uiOutput("year_slider"), # Dynamic year slider (rendered in server)
         
-        # NEW: Multi-select widget for countries
+        selectInput("region", "Choose a region:",
+                    choices = c("All", levels(epi_data_all$EPI_regions)), selected = "All"),
+        selectInput("plot_theme", "Choose Plot Theme:",
+                    choices = c("Classic", "Minimal", "Dark")),
+        uiOutput("year_slider"), # Dynamic year slider
+        
+        # Multi-select widget for countries
         pickerInput(
           inputId = "countries",
           label = "Select Countries:",
@@ -67,19 +91,11 @@ ui <-
           selected = unique(epi_data_all$Country)  # Initially select all
         ),
         
-        # Add the prettyCheckbox
-        prettyCheckbox(
-          inputId = "Id023",
-          label = "Filter High Population",
-          value = FALSE,  # Starts unchecked
-          status = "success",
-          fill = TRUE
-        ),
-        # Add the checkboxGroupButtons
-        checkboxGroupButtons( # or radioGroupButtons
-          inputId = "id",
-          label = "Choice: ",
-          choices = c("A", "B", "C")
+        # Checkbox group for categories
+        checkboxGroupButtons(
+          inputId = "category_selection",
+          label = "Category Selection:",
+          choices = c("Category A", "Category B", "Category C") # Example categories
         ),
         
         # Select menu
@@ -110,32 +126,25 @@ ui <-
           multiple = TRUE
         ),
         
-        # Dark Mode Toggle
-        switchInput(
-          inputId = "dark_mode",
-          label = "Dark Mode",
-          value = FALSE
+        # **Add the actionBttn**
+        actionBttn(
+          inputId = "update_data",  # Unique ID for the button
+          label = "Update Data",   # Text on the button
+          style = "material-flat", # Style of the button
+          color = "primary"      # Color of the button
         ),
         
-        # Theme Color Chooser
-        selectInput(
-          inputId = "theme_color",
-          label = "Theme Color:",
-          choices = c("superhero", "flatly", "sandstone", "united", "cosmo", "lumen", "simplex", "yeti"),
-          selected = "superhero"
-        ),
-        
-        hr(),  # Add a horizontal rule for visual separation
-        tags$p("Data Source: [NASA_EPI]", style = "font-size: 80%"), # Add a data source acknowledgement
-        tags$p("App by: [Fariba]", style = "font-size: 80%")  # Add a creator acknowledgement
+        hr(),
+        tags$p("Data Source: [NASA_EPI]", style = "font-size: 80%"),
+        tags$p("App by: [Fariba]", style = "font-size: 80%")
         
       ),
       
       layout_columns(
         col_widths = c(4, 4, 4),
-        value_box("Average EPI", textOutput("avg_epi"), showcase = "chart-line"), # changed icon
-        value_box("Highest EPI", textOutput("max_epi"), showcase = "trophy"),   # changed icon
-        value_box("Number of Countries", textOutput("country_count"), showcase = "flag") # changed icon
+        value_box("Average EPI", textOutput("avg_epi"), showcase = "chart-line"),
+        value_box("Highest EPI", textOutput("max_epi"), showcase = "trophy"),
+        value_box("Number of Countries", textOutput("country_count"), showcase = "flag")
       ),
       
       layout_columns(
@@ -178,26 +187,42 @@ ui <-
 # Define server logic -----------------------------------------------------
 server <- function(input, output, session) {
   
-  # Dynamic Theme (bslib)
-  output$dynamic_theme <- renderUI({
-    bs_theme(bootswatch = input$theme_color, version = 5)
-  })
-  
   # **Observe the prettyCheckbox Input**
-  observeEvent(input$Id023, {
-    if (input$Id023) {
-      print("Checkbox is checked: Filtering High Population")
-      # Add code here to do something when the checkbox is checked
+  observeEvent(input$show_epi_range, {
+    if (input$show_epi_range) {
+      shinyjs::show("epi_range")
     } else {
-      print("Checkbox is unchecked: No High Population Filter")
-      # Add code here to do something when it's unchecked
+      shinyjs::hide("epi_range")
     }
   })
   
+  # **Action Button Logic (actionBttn)**
+  observeEvent(input$update_data, {
+    showNotification("Data Updated!", type = "message")  # Display a notification
+    
+    epi_data_all <<- load_epi_data(data_file)  # Reload data
+    
+    # Update UI Elements: Slider, Countries, and Regions
+    updateSliderInput(session, "epi_range",
+                      min = min(epi_data_all$EPI, na.rm = TRUE),
+                      max = max(epi_data_all$EPI, na.rm = TRUE),
+                      value = c(min(epi_data_all$EPI, na.rm = TRUE), max(epi_data_all$EPI, na.rm =TRUE)))
+    updatePickerInput(session, "countries",
+                      choices = unique(epi_data_all$Country),
+                      selected = unique(epi_data_all$Country))
+    updateSelectInput(session, "region",
+                      choices = c("All", levels(epi_data_all$EPI_regions)), selected = "All")
+  })
+  
   # **Observe checkboxGroupButtons input**
-  observeEvent(input$id, {
-    print(paste("Selected choices:", paste(input$id, collapse = ", ")))
-    # Add code here to do something with the selected choices from the checkboxGroupButtons
+  observeEvent(input$category_selection, {
+    # Filter data based on checkbox group selection
+    if (!is.null(input$category_selection)) { # Check if something is selected
+      epi_data_all_filtered <<- epi_data_all %>%
+        filter(Category %in% input$category_selection)  # Replace Category if there exists.
+    } else {
+      epi_data_all_filtered <<- epi_data_all
+    }
   })
   
   # **Observe pickerInput (month_picker) input**
@@ -239,24 +264,19 @@ server <- function(input, output, session) {
   
   # Reactive expression for filtered data (for main plots)
   filtered_data <- reactive({
-    data <- epi_data_all %>% filter(Year == input$year) # Filter by year
+    data <- epi_data_all_filtered %>% filter(Year == input$year) # Use filtered dataset
     
     if (input$region != "All") {
       data <- data %>% filter(EPI_regions == input$region)
     }
     
-    data <- data %>%
-      filter(EPI >= input$epi_range[1] & EPI <= input$epi_range[2])
+    if (input$show_epi_range) {
+      data <- data %>%
+        filter(EPI >= input$epi_range[1] & EPI <= input$epi_range[2])
+    }
     
-    # NEW: Filter by selected countries
     data <- data %>%
       filter(Country %in% input$countries)
-    
-    # NEW: Additional filter based on checkbox
-    if (input$Id023) {
-      # Checkbox is checked: Filter for countries with population > 1 million
-      data <- data %>% filter(Population2005 > 1000000)  # Or whatever criteria you want
-    }
     
     data # Return the filtered data
   })
