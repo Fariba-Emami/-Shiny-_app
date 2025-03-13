@@ -103,7 +103,7 @@ ui <-
           inputId = "month_picker",
           label = "Select:",
           choices = month.name,
-          options = pickerOptions(
+          options = list(
             actionsBox = TRUE,
             size = 10,
             selectedTextFormat = "count > 3"
@@ -158,36 +158,35 @@ ui <-
           card_header("Scatter Plot (EPI vs. Resources)"),
           full_screen = TRUE,
           card_body(plotOutput("scatter_plot1"))
-        )
-      ),
-      
-      layout_columns(
-        col_widths = c(6, 6),
-        card(
-          card_header("Boxplot (ENVHEALTH)"),
-          full_screen = TRUE,
-          card_body(plotOutput("boxplot_envhealth"))
         ),
-        card(
-          card_header("Region Distribution"),
-          full_screen = TRUE,
-          card_body(plotOutput("pie_chart"))
+        
+        layout_columns(
+          col_widths = c(6, 6),
+          card(
+            card_header("Boxplot (ENVHEALTH)"),
+            full_screen = TRUE,
+            card_body(plotOutput("boxplot_envhealth"))
+          ),
+          card(
+            card_header("Region Distribution"),
+            full_screen = TRUE,
+            card_body(plotOutput("pie_chart"))
+          )
         )
-      ),
-      card(
-        card_header("EPI Over Time"),
-        full_screen = TRUE,
-        card_body(plotOutput("timeline_plot"))
-      ),
-      # Hidden input to store selected indicator
-      tags$div(id = "selected_indicator", style = "display:none;")
+      )
     )
   )
 
 # Define server logic -----------------------------------------------------
 server <- function(input, output, session) {
   
-  # **Observe the prettyCheckbox Input**
+  # **1. reactiveValues**: To store and manage values reactively
+  rv <- reactiveValues(
+    data_updated_count = 0, # Keep track of update data button clicks
+    selected_countries_count = 0 # Keep track of selected countries
+  )
+  
+  # **2. observeEvent**: Reacting to events - show/hide the EPI range slider
   observeEvent(input$show_epi_range, {
     if (input$show_epi_range) {
       shinyjs::show("epi_range")
@@ -196,13 +195,16 @@ server <- function(input, output, session) {
     }
   })
   
-  # **Action Button Logic (actionBttn)**
+  # **3. observeEvent**: Reacting to events - Action Button Logic
   observeEvent(input$update_data, {
-    showNotification("Data Updated!", type = "message")  # Display a notification
+    showNotification("Data Updated!", type = "message")
     
-    epi_data_all <<- load_epi_data(data_file)  # Reload data
+    epi_data_all <<- load_epi_data(data_file) # Reload data
     
-    # Update UI Elements: Slider, Countries, and Regions
+    # Increment the update count
+    rv$data_updated_count <- rv$data_updated_count + 1
+    
+    # Update UI Elements (if necessary after reloading)
     updateSliderInput(session, "epi_range",
                       min = min(epi_data_all$EPI, na.rm = TRUE),
                       max = max(epi_data_all$EPI, na.rm = TRUE),
@@ -214,56 +216,29 @@ server <- function(input, output, session) {
                       choices = c("All", levels(epi_data_all$EPI_regions)), selected = "All")
   })
   
-  # **Observe checkboxGroupButtons input**
+  # **4. observe**:  Performing side effects (logging) - every time countries change
+  observe({
+    print(paste("Number of countries selected: ", length(input$countries)))
+    # Increment selected_countries_count - if the countries have ever changed.
+    rv$selected_countries_count <- rv$selected_countries_count + 1
+  })
+  
+  # **5. observeEvent**: Reacting to events: handling the checkbox groups
   observeEvent(input$category_selection, {
     # Filter data based on checkbox group selection
-    if (!is.null(input$category_selection)) { # Check if something is selected
+    if (!is.null(input$category_selection)) {
       epi_data_all_filtered <<- epi_data_all %>%
-        filter(Category %in% input$category_selection)  # Replace Category if there exists.
+        filter(Category %in% input$category_selection)
     } else {
       epi_data_all_filtered <<- epi_data_all
     }
   })
   
-  # **Observe pickerInput (month_picker) input**
-  observeEvent(input$month_picker, {
-    print(paste("Selected months:", paste(input$month_picker, collapse = ", ")))
-    # Add code here to do something with the selected months
-  })
-  
-  # **Observe virtualSelectInput (season_picker) input**
-  observeEvent(input$season_picker, {
-    print(paste("Selected seasons/months:", paste(input$season_picker, collapse = ", ")))
-    # Add code here to do something with the selected seasons/months
-  })
-  
-  # **Modal Dialog for Indicator Selection**
-  observeEvent(input$show_indicator_modal, {
-    showModal(modalDialog(
-      title = "Choose an Indicator",
-      selectInput("modal_indicator", "Indicator:",
-                  choices = c("EPI", "ENVHEALTH", "ECOSYSTEM", "GDP_capita", "Population2005", "DALY_SC")),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_indicator", "Confirm")
-      )
-    ))
-  })
-  
-  # **Update selected_indicator when confirmed**
-  observeEvent(input$confirm_indicator, {
-    updateTextInput(session, "selected_indicator", value = input$modal_indicator)
-    removeModal()
-  })
-  
-  # Reactive expression to get the selected indicator (from the hidden input)
-  selected_indicator <- reactive({
-    req(input$selected_indicator)
-    input$selected_indicator
-  })
-  
-  # Reactive expression for filtered data (for main plots)
+  # **6. Reactive Expression**: for filtered data
   filtered_data <- reactive({
+    # 7. req()
+    req(rv$data_updated_count) # The calculations depend on data being loaded
+    
     data <- epi_data_all_filtered %>% filter(Year == input$year) # Use filtered dataset
     
     if (input$region != "All") {
@@ -366,24 +341,6 @@ server <- function(input, output, session) {
       coord_polar("y", start = 0) +
       labs(title = "Distribution of EPI Regions") +
       theme_void() + theme_choice()
-  })
-  
-  # Timeline plot
-  output$timeline_plot <- renderPlot({
-    req(selected_indicator()) # Ensure indicator is selected
-    
-    # Group by year and calculate the average indicator value
-    timeline_data <- epi_data_all %>%
-      group_by(Year) %>%
-      summarize(avg_indicator = mean(.data[[selected_indicator()]], na.rm = TRUE))
-    
-    ggplot(timeline_data, aes(x = Year, y = avg_indicator)) +
-      geom_line(color = "blue") +
-      geom_point(color = "blue") +
-      labs(title = paste("Average", selected_indicator(), "Over Time"),
-           x = "Year",
-           y = selected_indicator()) +
-      theme_minimal() + theme_choice()
   })
 }
 
